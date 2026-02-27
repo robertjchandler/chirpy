@@ -14,8 +14,9 @@ import (
 )
 
 type apiConfig struct {
-	dbQueries      *database.Queries
+	db             *database.Queries
 	fileserverHits atomic.Int32
+	platform       string
 }
 
 func (cfg *apiConfig) middlewareMetricsInc(next http.Handler) http.Handler {
@@ -41,8 +42,19 @@ func (cfg *apiConfig) handlerMetrics(w http.ResponseWriter, r *http.Request) {
 }
 
 func main() {
+	const filepathRoot = "."
+	const port = "8080"
+
 	godotenv.Load(".env")
 	dbURL := os.Getenv("DB_URL")
+	if dbURL == "" {
+		log.Fatal("DB_URL must be set")
+	}
+	platform := os.Getenv("PLATFORM")
+	if platform == "" {
+		log.Fatal("PLATFORM must be set")
+	}
+
 	db, err := sql.Open("postgres", dbURL)
 	if err != nil {
 		log.Fatalf("error connecting to db: %v", err)
@@ -50,16 +62,15 @@ func main() {
 	dbQueries := database.New(db)
 
 	apiCfg := apiConfig{
-		dbQueries:      dbQueries,
+		db:             dbQueries,
 		fileserverHits: atomic.Int32{},
+		platform:       platform,
 	}
-
-	const filepathRoot = "."
-	const port = "8080"
 
 	mux := http.NewServeMux()
 	mux.Handle("/app/", apiCfg.middlewareMetricsInc(http.StripPrefix("/app", http.FileServer(http.Dir(filepathRoot)))))
 	mux.HandleFunc("GET /api/healthz", handlerReadiness)
+	mux.HandleFunc("POST /api/users", apiCfg.handlerCreateUser)
 	mux.HandleFunc("POST /api/validate_chirp", handlerValidate)
 	mux.HandleFunc("GET /admin/metrics", apiCfg.handlerMetrics)
 	mux.HandleFunc("POST /admin/reset", apiCfg.handlerReset)
