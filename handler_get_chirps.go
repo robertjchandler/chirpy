@@ -36,7 +36,7 @@ func (cfg *apiConfig) handlerGetChirpByID(w http.ResponseWriter, r *http.Request
 		respondWithError(w, http.StatusNotFound, "Couldn't get chirp", err)
 		return
 	}
-	respondWithJSON(w, 200, Chirp{
+	respondWithJSON(w, http.StatusFound, Chirp{
 		ID:        chirp.ID,
 		CreatedAt: chirp.CreatedAt,
 		UpdatedAt: chirp.UpdatedAt,
