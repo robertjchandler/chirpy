@@ -2,52 +2,67 @@ package main
 
 import (
 	"net/http"
+	"sort"
 
 	"github.com/google/uuid"
+	"github.com/robertjchandler/chirpy/internal/database"
 )
 
+func authorIDFromRequest(r *http.Request) (uuid.UUID, error) {
+	authorIDString := r.URL.Query().Get("author_id")
+	if authorIDString == "" {
+		return uuid.Nil, nil
+	}
+	authorID, err := uuid.Parse(authorIDString)
+	if err != nil {
+		return uuid.Nil, err
+	}
+	return authorID, nil
+}
+
 func (cfg *apiConfig) handlerGetChirps(w http.ResponseWriter, r *http.Request) {
-	s := r.URL.Query().Get("author_id")
-	authorID, err := uuid.Parse(s)
+	authorID, err := authorIDFromRequest(r)
 	if err != nil {
 		respondWithError(w, http.StatusBadRequest, "Invalid author ID", err)
 		return
 	}
+
+	var dbChirps []database.Chirp
 	if authorID != uuid.Nil {
-		chirps, err := cfg.db.GetChirpsByUser(r.Context(), authorID)
-		if err != nil {
-			respondWithError(w, http.StatusInternalServerError, "Couldn't get chirps", err)
-			return
-		}
-		authorChirps := []Chirp{}
-		for _, chirp := range chirps {
-			authorChirps = append(authorChirps, Chirp{
-				ID:        chirp.ID,
-				CreatedAt: chirp.CreatedAt,
-				UpdatedAt: chirp.UpdatedAt,
-				Body:      chirp.Body,
-				UserID:    chirp.UserID,
-			})
-		}
-		respondWithJSON(w, http.StatusOK, authorChirps)
-		return
+		dbChirps, err = cfg.db.GetChirpsByUser(r.Context(), authorID)
+	} else {
+		dbChirps, err = cfg.db.GetChirps(r.Context())
 	}
-	chirps, err := cfg.db.GetChirps(r.Context())
 	if err != nil {
-		respondWithError(w, http.StatusInternalServerError, "Couldn't get chirps", err)
+		respondWithError(w, http.StatusInternalServerError, "Couldn't retrieve chirps", err)
 		return
 	}
-	structuredChirps := []Chirp{}
-	for _, chirp := range chirps {
-		structuredChirps = append(structuredChirps, Chirp{
-			ID:        chirp.ID,
-			CreatedAt: chirp.CreatedAt,
-			UpdatedAt: chirp.UpdatedAt,
-			Body:      chirp.Body,
-			UserID:    chirp.UserID,
+
+	sortDirection := "asc"
+	sortDirectionParam := r.URL.Query().Get("sort")
+	if sortDirectionParam == "desc" {
+		sortDirection = "desc"
+	}
+
+	chirps := []Chirp{}
+	for _, dbChirp := range dbChirps {
+		chirps = append(chirps, Chirp{
+			ID:        dbChirp.ID,
+			CreatedAt: dbChirp.CreatedAt,
+			UpdatedAt: dbChirp.UpdatedAt,
+			UserID:    dbChirp.UserID,
+			Body:      dbChirp.Body,
 		})
 	}
-	respondWithJSON(w, http.StatusOK, structuredChirps)
+
+	sort.Slice(chirps, func(i, j int) bool {
+		if sortDirection == "desc" {
+			return chirps[i].CreatedAt.After(chirps[j].CreatedAt)
+		}
+		return chirps[i].CreatedAt.Before(chirps[j].CreatedAt)
+	})
+
+	respondWithJSON(w, http.StatusOK, chirps)
 }
 
 func (cfg *apiConfig) handlerGetChirpByID(w http.ResponseWriter, r *http.Request) {
